@@ -10,8 +10,6 @@
 #include <cmath>
 #include <cassert>
 
-using namespace std::literals::string_literals;
-
 #define GLEW_STATIC
 #include <GL/glew.h>
 #include <GL/wglew.h>
@@ -59,9 +57,8 @@ namespace {
 		};
 	}
 
-	const std::string title{ "Skybox DDS" };
-	HDC hdc = nullptr; // Device context.
 	HWND hwnd = nullptr; // The Window handle.
+	HDC hdc = nullptr; // Device context.
 	HGLRC hglrc = nullptr; // Rendering context.
 	int windowWidth{ 1920 };
 	int windowHeight{ 1080 };
@@ -70,7 +67,7 @@ namespace {
 	GLuint pipeline{};
 	GLuint render_program{};
 	GLuint vao{};
-	std::array<GLuint, buffer::MAX> buffers;
+	std::array<GLuint, buffer::MAX> buffers{};
 	GLint blockSize{};
 	GLuint skyboxTexture{};
 }
@@ -86,7 +83,7 @@ void RenderFrame();
 void Shutdown();
 void CheckShader(GLuint shader);
 void CheckProgram(GLuint program);
-GLuint CreateShader(std::string_view filename, GLenum type);
+GLuint CreateShader(std::string_view filename, GLenum shaderType);
 GLuint CreateProgram(const std::vector<GLuint>& shaders);
 GLuint CreateTexture(const char* filename);
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -94,40 +91,42 @@ LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, LPSTR /*lpCmdLine*/, int /*nShowCmd*/)
 {
-	const std::string class_name{ "GLWindowClass" };
+	static constexpr const char* APP_TITLE = "Skybox DDS";
+	static constexpr const char* WINDOW_CLASS = "GLWindowClass";
 
-	WNDCLASSEX wcl = {};
-	wcl.cbSize = sizeof(WNDCLASSEX);
-	wcl.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
-	wcl.lpfnWndProc = WndProc;
-	wcl.cbClsExtra = 0;
-	wcl.cbWndExtra = sizeof(LONG_PTR);
-	wcl.hInstance = hInstance;
-	wcl.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
-	wcl.hCursor = LoadCursor(nullptr, IDC_ARROW);
-	wcl.hbrBackground = nullptr;
-	wcl.lpszMenuName = nullptr;
-	wcl.lpszClassName = class_name.c_str();
-	wcl.hIconSm = LoadIcon(nullptr, IDI_APPLICATION);
+	WNDCLASSEX wcex = {
+		.cbSize = sizeof(WNDCLASSEX),
+		.style = CS_HREDRAW | CS_VREDRAW,
+		.lpfnWndProc = WndProc,
+		.hInstance = hInstance,
+		.hIcon = LoadIcon(nullptr, IDI_APPLICATION),
+		.hCursor = LoadCursor(nullptr, IDC_ARROW),
+		.lpszClassName = WINDOW_CLASS,
+		.hIconSm = LoadIcon(nullptr, IDI_APPLICATION)
+	};
 
-	if (!RegisterClassEx(&wcl))
+	if (!RegisterClassEx(&wcex))
 		return 0;
 
 	DWORD wndExStyle = WS_EX_OVERLAPPEDWINDOW;
 	DWORD wndStyle = WS_OVERLAPPEDWINDOW;
 
-	RECT rc = {};
-	SetRect(&rc, 0, 0, windowWidth, windowHeight);
+	RECT rc = {
+		.left = 0L,
+		.top = 0L,
+		.right = static_cast<LONG>(windowWidth),
+		.bottom = static_cast<LONG>(windowHeight)
+	};
 	AdjustWindowRectEx(&rc, wndStyle, FALSE, wndExStyle);
 
-	hwnd = CreateWindowEx(wndExStyle, class_name.c_str(), title.c_str(), wndStyle,
+	hwnd = CreateWindowEx(wndExStyle, WINDOW_CLASS, APP_TITLE, wndStyle,
 		CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top,
 		nullptr, nullptr, hInstance, nullptr);
 
 	if (!hwnd)
 		return 0;
 
-	ShowWindow(hwnd, SW_SHOW);
+	ShowWindow(hwnd, SW_SHOWNORMAL);
 	UpdateWindow(hwnd);
 
 	if (!Init())
@@ -149,7 +148,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, LPSTR /*lpC
 	}
 
 	Shutdown();
-	UnregisterClass(class_name.c_str(), hInstance);
+	UnregisterClass(WINDOW_CLASS, hInstance);
+
 	return static_cast<int>(msg.wParam);
 }
 
@@ -157,7 +157,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	static POINT lastMousePos = {};		// Last mouse position.
 	static POINT currentMousePos = {};	// Current mouse position.
-	static bool isMouseActive = false;	// Is the left mouse button down.
+	static bool isMouseActive{ false };	// Is the left mouse button down.
 
 	switch (message)
 	{
@@ -236,51 +236,51 @@ void InitGL()
 {
 	hdc = GetDC(hwnd);
 	if (!hdc)
-		throw std::runtime_error("GetDC() failed"s);
+		throw std::runtime_error("Failed to GetDC().");
 
-	PIXELFORMATDESCRIPTOR pfd = {};
-	pfd.nSize = sizeof(PIXELFORMATDESCRIPTOR);
-	pfd.nVersion = 1;
-	pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
-	pfd.iPixelType = PFD_TYPE_RGBA;
-	pfd.cColorBits = 32;
-	pfd.cDepthBits = 24;
-	pfd.iLayerType = PFD_MAIN_PLANE;
+	PIXELFORMATDESCRIPTOR pfd = {
+		.nSize = sizeof(PIXELFORMATDESCRIPTOR),
+		.nVersion = 1,
+		.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,
+		.iPixelType = PFD_TYPE_RGBA,
+		.cColorBits = 32,
+		.cDepthBits = 24,
+	};
 
 	auto pixelFormat = ChoosePixelFormat(hdc, &pfd);
 	if (pixelFormat == 0)
-		throw std::runtime_error("ChoosePixelFormat() failed"s);
+		throw std::runtime_error("Failed to ChoosePixelFormat().");
 
 	if (!SetPixelFormat(hdc, pixelFormat, &pfd))
-		throw std::runtime_error("SetPixelFormat() failed"s);
+		throw std::runtime_error("Failed to SetPixelFormat().");
 
 	auto tempCtx = wglCreateContext(hdc);
 	if (!tempCtx || !wglMakeCurrent(hdc, tempCtx))
-		throw std::runtime_error("Creating temp render context failed"s);
+		throw std::runtime_error("Creating temp render context failed");
 
 	if (auto error = glewInit(); error != GLEW_OK)
-		throw std::runtime_error("GLEW Error: "s + std::to_string(error));
+		throw std::runtime_error("GLEW Error: " + std::to_string(error));
 
 	wglMakeCurrent(nullptr, nullptr);
 	wglDeleteContext(tempCtx);
 
-	std::array attribList{
+	constexpr std::array<int, 7> attribs
+	{
 		WGL_CONTEXT_MAJOR_VERSION_ARB, 4,
 		WGL_CONTEXT_MINOR_VERSION_ARB, 6,
-		WGL_CONTEXT_FLAGS_ARB, WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB,
 		WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
 		0
 	};
 
-	hglrc = wglCreateContextAttribsARB(hdc, 0, attribList.data());
+	hglrc = wglCreateContextAttribsARB(hdc, 0, attribs.data());
 	if (!hglrc || !wglMakeCurrent(hdc, hglrc))
-		throw std::runtime_error("Creating render context failed"s);
+		throw std::runtime_error("Creating render context failed");
 }
 
 void InitProgram()
 {
-	auto vs = CreateShader("skybox.vert"s, GL_VERTEX_SHADER);
-	auto fs = CreateShader("skybox.frag"s, GL_FRAGMENT_SHADER);
+	auto vs = CreateShader("skybox.vert", GL_VERTEX_SHADER);
+	auto fs = CreateShader("skybox.frag", GL_FRAGMENT_SHADER);
 	render_program = CreateProgram({ vs, fs });
 
 	glCreateProgramPipelines(1, &pipeline);
@@ -293,7 +293,7 @@ void InitBuffer()
 	glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment);
 	blockSize = glm::max(GLint(sizeof(Transform)), alignment);
 
-	glCreateBuffers(buffer::MAX, &buffers[0]);
+	glCreateBuffers(buffer::MAX, buffers.data());
 	glNamedBufferStorage(buffers[buffer::VERTEX], sizeof(vertices), vertices, 0);
 	glNamedBufferStorage(buffers[buffer::ELEMENT], sizeof(indices), indices, 0);
 	glNamedBufferStorage(buffers[buffer::TRANSFORM], blockSize, nullptr, GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
@@ -381,34 +381,35 @@ void RenderFrame()
 	glBindTextures(0, 1, &skyboxTexture);
 
 	glDrawElements(GL_TRIANGLE_STRIP, 8, GL_UNSIGNED_SHORT, nullptr);
-	glDrawElements(GL_TRIANGLE_STRIP, 8, GL_UNSIGNED_SHORT, (GLvoid*)(8 * sizeof(GLushort)));
+	glDrawElements(GL_TRIANGLE_STRIP, 8, GL_UNSIGNED_SHORT, (const void*)(8 * sizeof(GLushort)));
 }
 
-GLuint CreateShader(std::string_view filename, GLenum type)
+GLuint CreateShader(std::string_view filename, GLenum shaderType)
 {
-	auto const source = [filename]() {
+	auto source = [filename]() {
 		std::string result;
 		std::ifstream stream(filename.data());
 
-		if (!stream.is_open()) {
-			std::string str{ filename };
-			throw std::runtime_error("Could not open file: " + str);
-			return result;
+		if (!stream.is_open())
+		{
+			throw std::runtime_error("Could not open file: " + std::string(filename));
+
 		}
 
 		stream.seekg(0, std::ios::end);
 		result.reserve((size_t)stream.tellg());
 		stream.seekg(0, std::ios::beg);
 
-		result.assign(std::istreambuf_iterator<char>{stream},
-			std::istreambuf_iterator<char>{});
+		result.assign((std::istreambuf_iterator<char>(stream)),
+			std::istreambuf_iterator<char>());
 
 		return result;
 	}();
-	auto pSource = source.c_str();
 
-	GLuint shader = glCreateShader(type);
-	glShaderSource(shader, 1, &pSource, nullptr);
+	const GLchar* src = source.c_str();
+
+	GLuint shader{ glCreateShader(shaderType) };
+	glShaderSource(shader, 1, &src, nullptr);
 	glCompileShader(shader);
 	CheckShader(shader);
 
@@ -417,17 +418,19 @@ GLuint CreateShader(std::string_view filename, GLenum type)
 
 GLuint CreateProgram(const std::vector<GLuint>& shaders)
 {
-	GLuint program = glCreateProgram();
+	GLuint program{ glCreateProgram() };
 	glProgramParameteri(program, GL_PROGRAM_SEPARABLE, GL_TRUE);
 
-	for (const auto& shader : shaders) {
+	for (const auto& shader : shaders)
+	{
 		glAttachShader(program, shader);
 	}
 
 	glLinkProgram(program);
 	CheckProgram(program);
 
-	for (const auto& shader : shaders) {
+	for (const auto& shader : shaders)
+	{
 		glDetachShader(program, shader);
 		glDeleteShader(shader);
 	}
@@ -439,17 +442,21 @@ void CheckShader(GLuint shader)
 {
 	GLint isCompiled{};
 	glGetShaderiv(shader, GL_COMPILE_STATUS, &isCompiled);
-	if (isCompiled == GL_FALSE)
+
+	GLint maxLength{};
+	glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &maxLength);
+	
+	if (maxLength > 0
+#ifdef NDEBUG
+		&& isCompiled == GL_FALSE
+#endif // NDEBUG
+		)
 	{
-		GLint maxLength{};
-		glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &maxLength);
-		if (maxLength > 0)
-		{
-			auto infoLog = std::make_unique<GLchar[]>(maxLength);
-			glGetShaderInfoLog(shader, maxLength, &maxLength, infoLog.get());
-			glDeleteShader(shader);
-			throw std::runtime_error("Error compiled:\n"s + infoLog.get());
-		}
+		std::vector<char> buffer(maxLength);
+		glGetShaderInfoLog(shader, maxLength, nullptr, buffer.data());
+		glDeleteShader(shader);
+
+		throw std::runtime_error("Error compiled:\n" + std::string(buffer.begin(), buffer.end()));
 	}
 }
 
@@ -457,17 +464,21 @@ void CheckProgram(GLuint program)
 {
 	GLint isLinked{};
 	glGetProgramiv(program, GL_LINK_STATUS, &isLinked);
-	if (isLinked == GL_FALSE)
+
+	GLint maxLength{};
+	glGetProgramiv(program, GL_INFO_LOG_LENGTH, &maxLength);
+	
+	if (maxLength > 0
+#ifdef NDEBUG
+		&& isLinked == GL_FALSE
+#endif // NDEBUG
+		)
 	{
-		GLint maxLength{};
-		glGetProgramiv(program, GL_INFO_LOG_LENGTH, &maxLength);
-		if (maxLength > 0)
-		{
-			auto infoLog = std::make_unique<GLchar[]>(maxLength);
-			glGetProgramInfoLog(program, maxLength, &maxLength, infoLog.get());
-			glDeleteProgram(program);
-			throw std::runtime_error("Error linking:\n"s + infoLog.get());
-		}
+		std::vector<char> buffer(maxLength);
+		glGetProgramInfoLog(program, maxLength, nullptr, buffer.data());
+		glDeleteProgram(program);
+
+		throw std::runtime_error("Error linking:\n" + std::string(buffer.begin(), buffer.end()));
 	}
 }
 
@@ -475,13 +486,16 @@ void Shutdown()
 {
 	glDeleteProgram(render_program);
 	glDeleteProgramPipelines(1, &pipeline);
-	glDeleteBuffers(buffer::MAX, &buffers[0]);
+	glDeleteBuffers(buffer::MAX, buffers.data());
 	glDeleteVertexArrays(1, &vao);
 	glDeleteTextures(1, &skyboxTexture);
 
-	if (hwnd) {
-		if (hdc) {
-			if (hglrc) {
+	if (hwnd)
+	{
+		if (hdc)
+		{
+			if (hglrc)
+			{
 				wglMakeCurrent(hdc, nullptr);
 				wglDeleteContext(hglrc);
 				hglrc = nullptr;
